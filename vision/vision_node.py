@@ -39,8 +39,17 @@ def run_vision_node():
         min_tracking_confidence=0.5
     )
 
-    cap = cv2.VideoCapture(config.CAMERA_ID)
-    
+    # Initialize cameras
+    cameras = {}
+    for cam_name, port in config.CAMERA_PORTS.items():
+        c = cv2.VideoCapture(port)
+        c.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        cameras[cam_name] = c
+
+    active_cam_name = config.ACTIVE_CAMERA
+    last_known_yaw = 0.0
+    lost_frame_count = 0
+
     # UI State Variables
     display_text = "INITIALIZING..."
     display_color = (0, 255, 255) # Yellow
@@ -49,10 +58,15 @@ def run_vision_node():
 
     MSE_State=False
 
-    while cap.isOpened():
-        ret, frame = cap.read()
+    while cameras[active_cam_name].isOpened():
+        # Clear inactive hardware buffers
+        for name, c in cameras.items():
+            if name != active_cam_name:
+                c.grab()
+
+        ret, frame = cameras[active_cam_name].read()
         if not ret:
-            print("[Vision Node] Camera feed dropped.")
+            print(f"[Vision Node] Camera feed dropped on {active_cam_name}.")
             break
 
         h, w, _ = frame.shape
@@ -62,12 +76,54 @@ def run_vision_node():
         raw_r, raw_ear, raw_mar = None, None, None
 
         # 1. Feature Extraction (if face is found)
+        yaw = None
         if results.multi_face_landmarks:
             landmarks = results.multi_face_landmarks[0]
             pts_2d = get_2d_landmarks(landmarks, w, h)
             
             raw_r = get_rotation_matrix(pts_2d, w, h)
             raw_ear, raw_mar = calculate_aspect_ratios(landmarks, w, h)
+
+            if raw_r is not None:
+                euler_angles, _, _, _, _, _ = cv2.RQDecomp3x3(raw_r)
+                yaw = euler_angles[1]
+                last_known_yaw = yaw
+
+        if yaw is not None:
+            lost_frame_count = 0
+        else:
+            lost_frame_count += 1
+
+        # Handoff State Machine
+        switch_to = None
+        if active_cam_name == "center":
+            if yaw is not None:
+                if yaw < config.YAW_THRESHOLDS["left"]:
+                    switch_to = "left"
+                elif yaw > config.YAW_THRESHOLDS["right"]:
+                    switch_to = "right"
+            elif lost_frame_count > 3:
+                if last_known_yaw < -config.YAW_TREND_THRESHOLD:
+                    switch_to = "left"
+                elif last_known_yaw > config.YAW_TREND_THRESHOLD:
+                    switch_to = "right"
+        else: # left or right camera
+            if yaw is None and lost_frame_count > 3:
+                switch_to = "center"
+            elif yaw is not None:
+                if active_cam_name == "left" and yaw > -config.YAW_RETURN_THRESHOLD:
+                    switch_to = "center"
+                elif active_cam_name == "right" and yaw < config.YAW_RETURN_THRESHOLD:
+                    switch_to = "center"
+
+        if switch_to is not None and switch_to != active_cam_name:
+            active_cam_name = switch_to
+            buffer_mgr.buffer.clear()
+            buffer_mgr.missing_count = 0
+            buffer_mgr.last_valid_vector = None
+            lost_frame_count = 0
+            print(f"[Vision Node] Camera handoff to {active_cam_name}")
+            continue
 
         # 2. Pipeline Routing
         if not calibrator.is_calibrated():
@@ -155,7 +211,8 @@ def run_vision_node():
             calibrator = CalibrationManager() # Reinitialize
             buffer_mgr = BufferManager()
 
-    cap.release()
+    for c in cameras.values():
+        c.release()
     cv2.destroyAllWindows()
     push_sock.close()
     sub_sock.close()

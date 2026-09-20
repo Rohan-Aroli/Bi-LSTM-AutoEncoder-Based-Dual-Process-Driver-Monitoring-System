@@ -1,0 +1,62 @@
+# =====================================================================
+# Runtime & User-Specific Calibration Files
+# Dynamically generated during ignition/calibration on each user's machine.
+# =====================================================================
+calibration_anchor.npz
+mse_threshold.json
+*.npz
+*.npy
+*.pth
+
+# =====================================================================
+# Virtual Environments
+# =====================================================================
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# =====================================================================
+# Python Bytecode & Cache
+# =====================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+
+# =====================================================================
+# IDEs & Editor Configuration
+# =====================================================================
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# =====================================================================
+# Operating System Artifacts
+# =====================================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+
+# =====================================================================
+# Temporary & Diagnostic Dumps
+# =====================================================================
+digest.txt
+*.log
+*.tmp
+
+# Model weights
+*.pth
+*.pt
+*.onnx
+*.h5

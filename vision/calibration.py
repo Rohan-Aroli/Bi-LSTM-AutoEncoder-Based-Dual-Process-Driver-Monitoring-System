@@ -7,7 +7,7 @@ class CalibrationManager:
         self.filepath = config.CALIBRATION_FILE
         self.baselines = self.load_calibration()
         self.calibration_buffer = []
-        self.required_frames = 900 # 3-second ignition window
+        self.required_frames = 900 # 30-second ignition window
 
     def is_calibrated(self):
         """Returns True if baselines are loaded and ready."""
@@ -125,38 +125,41 @@ class CalibrationManager:
 
         return vector_8d
 
-    def get_calibrated_sequences(self, sequence_length=60):
-        """
-        Transforms the raw calibration buffer into relative 8D vectors
-        and chops them into non-overlapping sequences for batch GPU processing.
-        
-        Returns:
-            np.ndarray: Shape (batch_size, sequence_length, 8) -> e.g., (15, 60, 8)
-        """
-        # Ensure we actually have the baseline medians calculated first
-        if not self.baselines:
-            print("[Calibrator] Error: Baselines not calculated yet.")
-            return None
 
-        # 1. Transform all raw frames into normalized 8D vectors
-        normalized_batch = []
-        for frame in self.calibration_buffer:
-            vec_8d = self.transform_to_8d(frame["EAR"], frame["MAR"], frame["R"])
-            normalized_batch.append(vec_8d)
+    #deadcode! abandoned due to non-temporal behaviour of the dropped frames
+
+    # def get_calibrated_sequences(self, sequence_length=60):
+    #     """
+    #     Transforms the raw calibration buffer into relative 8D vectors
+    #     and chops them into non-overlapping sequences for batch GPU processing.
+        
+    #     Returns:
+    #         np.ndarray: Shape (batch_size, sequence_length, 8) -> e.g., (15, 60, 8)
+    #     """
+    #     # Ensure we actually have the baseline medians calculated first
+    #     if not self.baselines:
+    #         print("[Calibrator] Error: Baselines not calculated yet.")
+    #         return None
+
+    #     # 1. Transform all raw frames into normalized 8D vectors
+    #     normalized_batch = []
+    #     for frame in self.calibration_buffer:
+    #         vec_8d = self.transform_to_8d(frame["EAR"], frame["MAR"], frame["R"])
+    #         normalized_batch.append(vec_8d)
             
-        # Convert to a 2D numpy array -> Shape: (900, 8)
-        normalized_batch = np.array(normalized_batch, dtype=np.float32)
+    #     # Convert to a 2D numpy array -> Shape: (900, 8)
+    #     normalized_batch = np.array(normalized_batch, dtype=np.float32)
         
-        # 2. Chop into non-overlapping sequences
-        num_frames = normalized_batch.shape[0]
+    #     # 2. Chop into non-overlapping sequences
+    #     num_frames = normalized_batch.shape[0]
         
-        # Calculate how many full 60-frame chunks we can make (900 // 60 = 15)
-        num_sequences = num_frames // sequence_length
+    #     # Calculate how many full 60-frame chunks we can make (900 // 60 = 15)
+    #     num_sequences = num_frames // sequence_length
         
-        # Truncate any trailing frames if the buffer isn't perfectly divisible
-        normalized_batch = normalized_batch[:num_sequences * sequence_length]
+    #     # Truncate any trailing frames if the buffer isn't perfectly divisible
+    #     normalized_batch = normalized_batch[:num_sequences * sequence_length]
         
-        # 3. Reshape array into PyTorch's native batch format -> Shape: (15, 60, 8)
-        sequenced_batch = normalized_batch.reshape(num_sequences, sequence_length, 8)
+    #     # 3. Reshape array into PyTorch's native batch format -> Shape: (15, 60, 8)
+    #     sequenced_batch = normalized_batch.reshape(num_sequences, sequence_length, 8)
         
-        return sequenced_batch
+    #     return sequenced_batch

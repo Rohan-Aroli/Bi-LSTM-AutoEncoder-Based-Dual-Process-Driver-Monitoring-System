@@ -118,6 +118,7 @@ def run_vision_node():
                     push_sock.send_pyobj({"buffer": payload}, flags=zmq.NOBLOCK)
                 except zmq.Again:
                     # Failsafe if the pipe gets jammed
+                    print("[WARNING]: Pipeline is choking, Dropped the buffer!")
                     pass
 
         # 3. Asynchronous UI Update

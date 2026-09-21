@@ -3,6 +3,7 @@ import zmq
 import numpy as np
 import time
 import mediapipe as mp
+import math
 
 import config
 from vision.feature_extractor import get_2d_landmarks, get_rotation_matrix, calculate_aspect_ratios
@@ -59,7 +60,8 @@ def run_vision_node():
     MSE_State=False
 
     while cameras[active_cam_name].isOpened():
-        # Clear inactive hardware buffers
+        # Hardware Buffer Flush:
+        # Calling c.grab() on inactive cameras silently clears stale frames from the USB hardware queue to guarantee zero-latency handoffs.
         for name, c in cameras.items():
             if name != active_cam_name:
                 c.grab()
@@ -85,8 +87,11 @@ def run_vision_node():
             raw_ear, raw_mar = calculate_aspect_ratios(landmarks, w, h)
 
             if raw_r is not None:
-                euler_angles, _, _, _, _, _ = cv2.RQDecomp3x3(raw_r)
-                yaw = euler_angles[1]
+                # Yaw Vector Extraction:
+                # Using vector projection (atan2) avoids the angle-flipping issues inherent in Euler decompositions.
+                nose_vec_x = raw_r[0, 2]
+                nose_vec_z = raw_r[2, 2]
+                yaw = math.degrees(math.atan2(nose_vec_x, nose_vec_z))
                 last_known_yaw = yaw
 
         if yaw is not None:
@@ -94,9 +99,11 @@ def run_vision_node():
         else:
             lost_frame_count += 1
 
-        # Handoff State Machine
+        # Handoff State Machine:
+        # Evaluates center-to-side and side-to-center transition logic.
         switch_to = None
         if active_cam_name == "center":
+            # Center-to-side transition logic
             if yaw is not None:
                 if yaw < config.YAW_THRESHOLDS["left"]:
                     switch_to = "left"
@@ -108,6 +115,7 @@ def run_vision_node():
                 elif last_known_yaw > config.YAW_TREND_THRESHOLD:
                     switch_to = "right"
         else: # left or right camera
+            # Side-to-center transition logic
             if yaw is None and lost_frame_count > 3:
                 switch_to = "center"
             elif yaw is not None:
@@ -118,6 +126,10 @@ def run_vision_node():
 
         if switch_to is not None and switch_to != active_cam_name:
             active_cam_name = switch_to
+
+            # Perspective Reset:
+            # buffer_mgr.buffer.clear() prevents the Bi-LSTM from receiving a sequence
+            # with an instant viewpoint jump, which would trigger a false anomaly.
             buffer_mgr.buffer.clear()
             buffer_mgr.missing_count = 0
             buffer_mgr.last_valid_vector = None
@@ -208,8 +220,7 @@ def run_vision_node():
             import os
             if os.path.exists(config.CALIBRATION_FILE):
                 os.remove(config.CALIBRATION_FILE)
-            calibrator = CalibrationManager() # Reinitialize
-            buffer_mgr = BufferManager()
+            pass
 
     for c in cameras.values():
         c.release()

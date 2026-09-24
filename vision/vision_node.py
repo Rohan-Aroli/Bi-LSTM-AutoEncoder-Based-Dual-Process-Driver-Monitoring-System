@@ -3,6 +3,7 @@ import zmq
 import numpy as np
 import time
 import mediapipe as mp
+import math
 
 import config
 from vision.feature_extractor import get_2d_landmarks, get_rotation_matrix, calculate_aspect_ratios
@@ -39,8 +40,17 @@ def run_vision_node():
         min_tracking_confidence=0.5
     )
 
-    cap = cv2.VideoCapture(config.CAMERA_ID)
-    
+    # Initialize cameras
+    cameras = {}
+    for cam_name, port in config.CAMERA_PORTS.items():
+        c = cv2.VideoCapture(port)
+        c.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        cameras[cam_name] = c
+
+    active_cam_name = config.ACTIVE_CAMERA
+    last_known_yaw = 0.0
+    lost_frame_count = 0
+
     # UI State Variables
     display_text = "INITIALIZING..."
     display_color = (0, 255, 255) # Yellow
@@ -49,10 +59,16 @@ def run_vision_node():
 
     MSE_State=False
 
-    while cap.isOpened():
-        ret, frame = cap.read()
+    while cameras[active_cam_name].isOpened():
+        # Hardware Buffer Flush:
+        # Calling c.grab() on inactive cameras silently clears stale frames from the USB hardware queue to guarantee zero-latency handoffs.
+        for name, c in cameras.items():
+            if name != active_cam_name:
+                c.grab()
+
+        ret, frame = cameras[active_cam_name].read()
         if not ret:
-            print("[Vision Node] Camera feed dropped.")
+            print(f"[Vision Node] Camera feed dropped on {active_cam_name}.")
             break
 
         h, w, _ = frame.shape
@@ -62,12 +78,64 @@ def run_vision_node():
         raw_r, raw_ear, raw_mar = None, None, None
 
         # 1. Feature Extraction (if face is found)
+        yaw = None
         if results.multi_face_landmarks:
             landmarks = results.multi_face_landmarks[0]
             pts_2d = get_2d_landmarks(landmarks, w, h)
             
             raw_r = get_rotation_matrix(pts_2d, w, h)
             raw_ear, raw_mar = calculate_aspect_ratios(landmarks, w, h)
+
+            if raw_r is not None:
+                # Yaw Vector Extraction:
+                # Using vector projection (atan2) avoids the angle-flipping issues inherent in Euler decompositions.
+                nose_vec_x = raw_r[0, 2]
+                nose_vec_z = raw_r[2, 2]
+                yaw = math.degrees(math.atan2(nose_vec_x, nose_vec_z))
+                last_known_yaw = yaw
+
+        if yaw is not None:
+            lost_frame_count = 0
+        else:
+            lost_frame_count += 1
+
+        # Handoff State Machine:
+        # Evaluates center-to-side and side-to-center transition logic.
+        switch_to = None
+        if active_cam_name == "center":
+            # Center-to-side transition logic
+            if yaw is not None:
+                if yaw < config.YAW_THRESHOLDS["left"]:
+                    switch_to = "left"
+                elif yaw > config.YAW_THRESHOLDS["right"]:
+                    switch_to = "right"
+            elif lost_frame_count > 3:
+                if last_known_yaw < -config.YAW_TREND_THRESHOLD:
+                    switch_to = "left"
+                elif last_known_yaw > config.YAW_TREND_THRESHOLD:
+                    switch_to = "right"
+        else: # left or right camera
+            # Side-to-center transition logic
+            if yaw is None and lost_frame_count > 3:
+                switch_to = "center"
+            elif yaw is not None:
+                if active_cam_name == "left" and yaw > -config.YAW_RETURN_THRESHOLD:
+                    switch_to = "center"
+                elif active_cam_name == "right" and yaw < config.YAW_RETURN_THRESHOLD:
+                    switch_to = "center"
+
+        if switch_to is not None and switch_to != active_cam_name:
+            active_cam_name = switch_to
+
+            # Perspective Reset:
+            # buffer_mgr.buffer.clear() prevents the Bi-LSTM from receiving a sequence
+            # with an instant viewpoint jump, which would trigger a false anomaly.
+            buffer_mgr.buffer.clear()
+            buffer_mgr.missing_count = 0
+            buffer_mgr.last_valid_vector = None
+            lost_frame_count = 0
+            print(f"[Vision Node] Camera handoff to {active_cam_name}")
+            continue
 
         # 2. Pipeline Routing
         if not calibrator.is_calibrated():
@@ -158,10 +226,10 @@ def run_vision_node():
             import os
             if os.path.exists(config.CALIBRATION_FILE):
                 os.remove(config.CALIBRATION_FILE)
-            calibrator = CalibrationManager() # Reinitialize
-            buffer_mgr = BufferManager()
+            pass
 
-    cap.release()
+    for c in cameras.values():
+        c.release()
     cv2.destroyAllWindows()
     push_sock.close()
     sub_sock.close()

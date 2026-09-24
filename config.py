@@ -11,7 +11,12 @@ CALIBRATION_FILE = str(BASE_DIR / "calibration_anchor.npz")
 MSE_THRESHOLD_FILE = str(BASE_DIR / "mse_threshold.json")
 
 # System Settings
-CAMERA_ID = 0
+CAMERA_PORTS = {"left": 1, "center": 0, "right": 2}
+ACTIVE_CAMERA = "center"
+YAW_THRESHOLDS = {"left": -30.0, "right": 30.0}
+YAW_TREND_THRESHOLD = 20.0
+YAW_RETURN_THRESHOLD = 20.0
+
 FPS = 30
 ZMQ_PUSH_PORT = 5555
 ZMQ_SUB_PORT = 5556

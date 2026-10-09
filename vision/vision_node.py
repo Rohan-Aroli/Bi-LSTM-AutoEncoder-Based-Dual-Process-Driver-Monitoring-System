@@ -198,6 +198,11 @@ def run_vision_node():
             if latest_result["state"] == "NORMAL":
                 display_text = "AWAKE"
                 display_color = (0, 255, 0) # Green
+            elif latest_result["state"] == "CALIBRATION_FAILED":
+                mse_collector.buffer.clear()
+                MSE_State = False
+                display_text = "CALIB FAILED - RETRYING"
+                display_color = (0, 0, 255) # Red
             else:
                 display_text = "DROWSY ANOMALY DETECTED"
                 display_color = (0, 0, 255) # Red
@@ -220,7 +225,10 @@ def run_vision_node():
             import os
             if os.path.exists(config.CALIBRATION_FILE):
                 os.remove(config.CALIBRATION_FILE)
-            pass
+            calibrator = CalibrationManager()
+            buffer_mgr = BufferManager()
+            mse_collector.buffer.clear()
+            MSE_State = False
 
     for c in cameras.values():
         c.release()

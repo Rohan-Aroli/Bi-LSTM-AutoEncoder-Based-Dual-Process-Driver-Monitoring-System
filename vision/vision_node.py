@@ -193,12 +193,13 @@ def run_vision_node():
         try:
             # Check for a new prediction from the GPU without blocking the camera
             latest_result = sub_sock.recv_pyobj(flags=zmq.NOBLOCK)
+            state = latest_result.get("state")
             
             # Update UI based on GPU output
-            if latest_result["state"] == "NORMAL":
+            if state == "NORMAL":
                 display_text = "AWAKE"
                 display_color = (0, 255, 0) # Green
-            elif latest_result["state"] == "CALIBRATION_FAILED":
+            elif state == "CALIBRATION_FAILED":
                 mse_collector.buffer.clear()
                 MSE_State = False
                 display_text = "CALIB FAILED - RETRYING"

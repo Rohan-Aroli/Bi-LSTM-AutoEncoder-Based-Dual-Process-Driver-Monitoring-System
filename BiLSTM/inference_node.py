@@ -1,3 +1,4 @@
+import math
 import zmq
 import torch
 import torch.nn as nn
@@ -49,11 +50,13 @@ def run_inference_node():
             # --- THE NEW CALIBRATION CATCHER ---
             if payload_type == "CALIBRATE_MSE":
                 print(f"[Inference Node] Received {len(buffer_data)} frames for MSE Calibration.")
-                # Your compute_and_save method handles the 60-frame overlapping slices natively
+                # Your compute_and_save method handles the 60-frame non-overlapping slices natively
                 ANOMALY_THRESHOLD = mse_mgr.compute_and_save(model, device, buffer_data)
-                if ANOMALY_THRESHOLD is None:
-                    Anamaly_Threshold = 0.5 # Fallback threshold if calibration fails
-                    print("[Inference Node] WARNING:MSE Calibration failed. Using default threshold of 0.5.")
+                if ANOMALY_THRESHOLD is None or math.isnan(ANOMALY_THRESHOLD):
+                    print("[Inference Node] WARNING: Calibration failed due to bad data. Threshold is invalid.")
+                    pub_sock.send_pyobj({"state": "CALIBRATION_FAILED"})
+                    continue
+                    
                 # Tell the vision node we are done
                 pub_sock.send_pyobj({"state": "NORMAL"}) 
                 continue
